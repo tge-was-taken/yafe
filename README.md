@@ -8,6 +8,7 @@ Want more objects supported? Contribute to the template over at https://github.c
 
 # Why a Max plugin?
 Turns out making your own 3d editor isn't so easy. Who'd have guessed?
+
 Leveraging custom object attributes and the innate 3d editing capabilities of 3ds max, it's not too different from what a handcrafted editor would look like.
 
 # Requirements
