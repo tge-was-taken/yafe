@@ -76,6 +76,8 @@ FBN_BLOCK_COLOR = {
 
 gCustomAttributeCache = dict()
 gFlipUpAxis = True
+gFbnHelper = None
+gFbnBlockHelpers = dict()
 
 def getScriptDir():
     return os.path.dirname(os.path.realpath(__file__))
@@ -117,25 +119,25 @@ def loadFile( path, endian, type, cb ):
             inst = type.read( stream )
             cb( inst, path )
             
-def createDummy( parent, name, pos, rot, color ):
-    dummy = rt.Point()
+def createHelper( parent, name, pos, rot, color ):
+    helper = rt.Point()
     if rot != None:
         if not hasattr( rot, 'W' ):
-            dummy.rotation = rt.Quat( rot.X, rot.Y, rot.Z, 1 ) 
+            helper.rotation = rt.Quat( rot.X, rot.Y, rot.Z, 1 ) 
         else:
-            dummy.rotation = rt.Quat( rot.X, rot.Y, rot.Z, rot.W )
+            helper.rotation = rt.Quat( rot.X, rot.Y, rot.Z, rot.W )
     if pos != None:
-        dummy.pos = rt.Point3( pos.X, pos.Y, pos.Z )
-    dummy.name = name
-    dummy.parent = parent
-    dummy.scale = rt.Point3( 4, 4, 4 )
-    dummy.wirecolor = color
+        helper.pos = rt.Point3( pos.X, pos.Y, pos.Z )
+    helper.name = name
+    helper.parent = parent
+    helper.scale = rt.Point3( 4, 4, 4 )
+    helper.wirecolor = color
     
     global gFlipUpAxis
     if gFlipUpAxis:
-        dummy.transform *= Y_TO_Z_UP_MATRIX
+        helper.transform *= Y_TO_Z_UP_MATRIX
     
-    return dummy
+    return helper
     
 def getMaxscriptType( field ):
     typeName = field.type.__qualname__
@@ -175,22 +177,22 @@ def iterObjectFields( obj, parentObj=None, field=None, path=None, elementIndex=N
 def genCustomAttributesFields( obj ):
     s = ''
     for parentObj, val, field, path, elementIndex in iterObjectFields( obj ):
-        varName = path.replace(".", "_").replace("[", "_").replace("]", "_")
+        varName = "_" + path.replace(".", "_").replace("[", "_").replace("]", "_")
         s += f"      {varName} type:{getMaxscriptType(field)} ui:ui{varName}\n"
     return s
 
 def genCustomAttributesRolloutFields( obj ):
     s = ''
     for parentObj, val, field, path, elementIndex in iterObjectFields( obj ):
-        varName = path.replace(".", "_").replace("[", "_").replace("]", "_")
+        varName = "_" + path.replace(".", "_").replace("[", "_").replace("]", "_")
         dispName = path
         s += f'      label lbl{varName} "{dispName}" across:2 align:#left\n'
-        s += f'      {getMaxscriptControl(field)} ui{varName} "" type:{getMaxscriptType(field)} across:2 offset:[0,0] width:96 range:[-4294967296,4294967296,0] align:#left\n' 
+        s += f'      {getMaxscriptControl(field)} ui{varName} "" type:{getMaxscriptType(field)} across:2 offset:[16,0] width:128 range:[-4294967296,4294967296,0] align:#left\n' 
     return s
         
 def assignCustomAttributesFromObject( obj, attribData ):
     for parentObj, val, field, path, elementIndex in iterObjectFields( obj ):
-        varName = path.replace(".", "_").replace("[", "_").replace("]", "_")
+        varName = "_" + path.replace(".", "_").replace("[", "_").replace("]", "_")
         assert( hasattr( attribData, varName ) )
         #print( attribData, varName, val )
         setattr( attribData, varName, val )
@@ -198,7 +200,7 @@ def assignCustomAttributesFromObject( obj, attribData ):
 def assignObjectFromCustomAttributes( obj, attribData ):
     for parentObj, val, field, path, elementIndex in iterObjectFields( obj ):
         #print( parentObj, val, field, path, field.name )
-        varName = path.replace(".", "_").replace("[", "_").replace("]", "_")
+        varName = "_" + path.replace(".", "_").replace("[", "_").replace("]", "_")
         attribVal = getattr( attribData, varName )
         assert( hasattr( parentObj, field.name ) )
         
@@ -233,7 +235,7 @@ def genCustomAttributes( entry ):
         s += "    )\n"
         s += ")\n"
         gCustomAttributeCache[typeName] = s
-        #print( s )
+        print( s )
         return s
     return s
     
@@ -251,18 +253,37 @@ def addCustomAttributes( obj, node ):
     rt.custAttributes.add( node, rt.execute( genCustomAttributes( obj ) ) )
     assignCustomAttributesFromObject( obj, getObjectCustomAttributes( obj, node ) )
     
+def createDefaultBlockEntryHelper( block, blockHelper, entry, i, color ):
+    pos = None 
+    rot = None
+    id = None
+    if hasattr( entry, 'Position' ):
+        pos = entry.Position
+    if hasattr( entry, 'Rotation' ):
+        rot = entry.Rotation
+    if hasattr( entry, 'Id' ):
+        id = entry.Id
+    
+    entryHelper = createHelper( blockHelper, getFbnEntryName( block, entry, i, id ), pos, rot, color )
+    addCustomAttributes( entry, entryHelper )
+    return entryHelper
+    
 def importFbn( path ):
     fbn = None
     with BinaryStream.openReadFile( path, Endian.BIG ) as stream:
         fbn = FbnBinary.read( stream )
+    isHtb = len( fbn.blocks ) == 1 and fbn.blocks[0][0].Type == 5
     
-    # create FBN dummy
-    fbnDummy = createDummy( None, os.path.basename( path ), None, None, rt.green )
+    # create FBN helper
+    global gFbnHelper
+    global gFbnBlockHelpers
+    gFbnHelper = createHelper( None, os.path.basename( path ), None, None, rt.green )
+    
     for block, entries in fbn.blocks:            
-        # create dummy for each block
+        # create helper for each block
         color = getFbnBlockColor( block.Type )
-        blockDummy = createDummy( fbnDummy, getFbnBlockName( block.Type ), None, None, color )
-        addCustomAttributes( block, blockDummy )
+        blockHelper = createHelper( gFbnHelper, getFbnBlockName( block.Type ), None, None, color )
+        addCustomAttributes( block, blockHelper )
         
         if block.ListOffset == 0:
             # empty
@@ -270,63 +291,45 @@ def importFbn( path ):
                 
         if block.Type in [1, 19, 22]: # trigger volumes
             for i, entry in enumerate( entries ):
-                triggerDummy = createDummy( blockDummy, getFbnEntryName( block, entry, i, None ), entry.Center, None, color )
-                addCustomAttributes( entry, triggerDummy )
-        # 2
-        # 3
-        elif block.Type in [4]: # entrances
+                triggerHelper = createHelper( blockHelper, getFbnEntryName( block, entry, i, None ), entry.Center, None, color )
+                addCustomAttributes( entry, triggerHelper )
+        elif block.Type in [5]: # htb hit def
+            # TODO wont work if block node is renamed
+            triggerBlockHelper = rt.getNodeByName( FBN_BLOCK_NAMES[1] )
+            
             for i, entry in enumerate( entries ):
-                entranceDummy = createDummy( blockDummy, getFbnEntryName( block, entry, i, entry.Id ), entry.Position, entry.Rotation, color )
-                addCustomAttributes( entry, entranceDummy )
-        elif block.Type in [5]: # hit definitions
-            for i, entry in enumerate( entries ):
-                hitDummy = createDummy( blockDummy, getFbnEntryName( block, entry, i, None ), None, None, color )
-                addCustomAttributes( entry, hitDummy )
-        # 6
-        # 7
-        elif block.Type in [8]: # dungeon thing
-            for i, entry in enumerate( entries ):
-                entryDummy = createDummy( blockDummy, getFbnEntryName( block, entry, i, None ), entry.Position, None, color )
-                addCustomAttributes( entry, entryDummy )
-        elif block.Type in [9]: # dungeon thing
-            for i, entry in enumerate( entries ):
-                entryDummy = createDummy( blockDummy, getFbnEntryName( block, entry, i, None ), entry.Position, None, color )
-                addCustomAttributes( entry, entryDummy )
-        elif block.Type in [10]: # dungeon thing
-            for i, entry in enumerate( entries ):
-                entryDummy = createDummy( blockDummy, getFbnEntryName( block, entry, i, None ), None, None, color )
-                addCustomAttributes( entry, entryDummy )
+                # try to parent to trigger if possible
+                if triggerBlockHelper != None:
+                    try:
+                        triggerBlockEntryHelper = triggerBlockHelper.children[i]
+                        entryHelper = createDefaultBlockEntryHelper( block, blockHelper, entry, i, color )
+                        #entryHelper.parent = triggerBlockEntryHelper
+                        entryHelper.transform = triggerBlockEntryHelper.transform
+                    except:
+                        createDefaultBlockEntryHelper( block, blockHelper, entry, i, color )
+                else:
+                    createDefaultBlockEntryHelper( block, blockHelper, entry, i, color )
+            
         elif block.Type in [11]: # dungeon thing
             for i, entry in enumerate( entries ):
-                entryDummy = createDummy( blockDummy, getFbnEntryName( block, entry, i, None ), None, None, color )
-                addCustomAttributes( entry, entryDummy )
+                entryHelper = createHelper( blockHelper, getFbnEntryName( block, entry, i, None ), None, None, color )
+                addCustomAttributes( entry, entryHelper )
                 
                 # create sub entry dummies
                 for j in range( 0, entry.EntryCount ):
-                    subEntryDummy = createDummy( entryDummy, f"{entryDummy.name}_{j}", None, None, color )
-                    addCustomAttributes( entry.Entries[j], subEntryDummy )
-        # 12
-        # 13
+                    subEntryHelper = createHelper( entryHelper, f"{entryHelper.name}_{j}", None, None, color )
+                    addCustomAttributes( entry.Entries[j], subEntryHelper )
         elif block.Type in [14]: # npcs
             for i, entry in enumerate( entries ):
-                npcDummy = createDummy( blockDummy, getFbnEntryName( block, entry, i, entry.Id ), entry.PathNodes[0], None, color )
-                addCustomAttributes( entry, npcDummy )
+                npcHelper = createHelper( blockHelper, getFbnEntryName( block, entry, i, entry.Id ), entry.PathNodes[0], None, color )
+                addCustomAttributes( entry, npcHelper )
                 
                 for j in range( 1, entry.PathNodeCount ):
-                    pathNodeDummy = createDummy( npcDummy, f"npc_{entry.Id}_pathnode_{j}", entry.PathNodes[j], None, color )
-        # 15
-        # 16
-        # 17
-        elif block.Type in [18]: # dungeon thing
-            for i, entry in enumerate( entries ):
-                entryDummy = createDummy( blockDummy, getFbnEntryName( block, entry, i, None ), entry.Position, entry.Rotation, color )
-                addCustomAttributes( entry, entryDummy )
+                    pathNodeHelper = createHelper( npcHelper, f"npc_{entry.Id}_pathnode_{j}", entry.PathNodes[j], None, color )
         else:
-            print( f'warning: block {block} not fully supported' )
+            # handle entry generically
             for i, entry in enumerate( entries ):
-                # create generic dummy
-                entryDummy = createDummy( blockDummy, getFbnEntryName( block, entry, i, None ), None, None, color )
-                addCustomAttributes( entry, entryDummy )
+                createDefaultBlockEntryHelper( block, blockHelper, entry, i, color )
                 
 def _convertPoint3ToVector3( v ):
     res = Vector3()
@@ -334,121 +337,113 @@ def _convertPoint3ToVector3( v ):
     res.Y = v[1]
     res.Z = v[2]
     return res
+    
+def _convertQuatToQuaternion( v ):
+    res = Quaternion()
+    res.X = v[0]
+    res.Y = v[1]
+    res.Z = v[2]
+    res.W = v[3]
+    return res
 
-def getDummyPositionVector3( dummy ):
-    tfm = rt.copy( dummy.transform )
+def getHelperPositionVector3( helper ):
+    tfm = rt.copy( helper.transform )
     
     global gFlipUpAxis
     if gFlipUpAxis:
         tfm *= Z_TO_Y_UP_MATRIX
         
     return _convertPoint3ToVector3( tfm.translationpart )
+    
+def getHelperRotationVector3( helper ):
+    tfm = rt.copy( helper.transform )
+    
+    global gFlipUpAxis
+    if gFlipUpAxis:
+        tfm *= Z_TO_Y_UP_MATRIX
+        
+    return _convertPoint3ToVector3( tfm.rotationpart )
+    
+def getHelperRotationQuat( helper ):
+    tfm = rt.copy( helper.transform )
+    
+    global gFlipUpAxis
+    if gFlipUpAxis:
+        tfm *= Z_TO_Y_UP_MATRIX
+        
+    return _convertQuatToQuaternion( tfm.rotationpart )
             
 def exportFbn( path ):
     print( f'exporting FBN to {path}' )
-    fbnDummy = rt.selection[0]
-    print( f'FBN root: {fbnDummy}' )
+    fbnHelper = rt.selection[0]
+    print( f'FBN root: {fbnHelper}' )
     
     fbn = FbnBinary()
     
-    # each block will be a child of the fbn dummy node
-    for blockDummy in fbnDummy.children:
-        print(f'exporting block dummy: {blockDummy}')
+    # each block will be a child of the fbn helper node
+    for blockHelper in fbnHelper.children:
+        print(f'exporting block helper: {blockHelper}')
         
         # assign custom attribute values to block
         block = FbnBlock()
         entries = None
-        assignObjectFromCustomAttributes( block, blockDummy )
+        assignObjectFromCustomAttributes( block, blockHelper )
         
         # collect the list items, if any
         if block.Type in [1, 19, 22]: # trigger volumes
             entries = []
-            for triggerDummy in blockDummy.children:
+            for triggerHelper in blockHelper.children:
                 trigger = FbnTriggerVolume()
-                assignObjectFromCustomAttributes( trigger, triggerDummy )
+                assignObjectFromCustomAttributes( trigger, triggerHelper )
                 # TODO proper handling
-                trigger.Center = getDummyPositionVector3( triggerDummy )
+                trigger.Center = getHelperPositionVector3( triggerHelper )
                 entries.append( trigger )
-        # 2, 3
-        elif block.Type in [4]: # entrances
-            entries = []
-            for entranceDummy in blockDummy.children:
-                entrance = FbnEntrance()
-                assignObjectFromCustomAttributes( entrance, entranceDummy )
-                entrance.Position = getDummyPositionVector3( entranceDummy )
-                entries.append( entrance )
-        elif block.Type in [5]: # hit definitions
-            entries = []
-            for hitDummy in blockDummy.children:
-                hitDef = FbnHitDefinition()
-                assignObjectFromCustomAttributes( hitDef, hitDummy )
-                entries.append( hitDef )
-        # 6, 7
-        elif block.Type in [8]: # dungeon thing
-            entries = []
-            for entryDummy in blockDummy.children:
-                entry = FbnBlock8Entry()
-                assignObjectFromCustomAttributes( entry, entryDummy )
-                entry.Position = getDummyPositionVector3( entryDummy )
-                entries.append( entry )
-        elif block.Type in [9]: # dungeon thing
-            entries = []
-            for entryDummy in blockDummy.children:
-                entry = FbnBlock9Entry()
-                assignObjectFromCustomAttributes( entry, entryDummy )
-                entry.Position = getDummyPositionVector3( entryDummy )
-                entries.append( entry )   
-        elif block.Type in [10]: # dungeon thing
-            entries = []
-            for entryDummy in blockDummy.children:
-                entry = FbnBlock10Entry()
-                assignObjectFromCustomAttributes( entry, entryDummy )
-                entries.append( entry )
         elif block.Type in [11]: # dungeon thing
             entries = []
-            for entryDummy in blockDummy.children:
+            for entryHelper in blockHelper.children:
                 entry = FbnBlock11Entry()
-                assignObjectFromCustomAttributes( entry, entryDummy )
+                assignObjectFromCustomAttributes( entry, entryHelper )
                 
                 # collect sub entries
-                for subEntryDummy in entryDummy.children:
+                for subEntryHelper in entryHelper.children:
                     subEntry = FbnBlock11SubEntry()
-                    assignObjectFromCustomAttributes( subEntry, subEntryDummy )
+                    assignObjectFromCustomAttributes( subEntry, subEntryHelper )
                     entry.Entries.append( subEntry )
                     
                 entry.EntryCount = len(entry.Entries)
                 entries.append( entry )
-        # 12, 13
         elif block.Type in [14]: # npcs
             entries = []
-            for npcDummy in blockDummy.children:
+            for npcHelper in blockHelper.children:
                 npc = FbnNpc()
-                assignObjectFromCustomAttributes( npc, npcDummy )
+                assignObjectFromCustomAttributes( npc, npcHelper )
                 
                 # create initial path node (base position)
-                npc.PathNodes.append( getDummyPositionVector3( npcDummy ) )
+                npc.PathNodes.append( getHelperPositionVector3( npcHelper ) )
 
                 # create path nodes
-                for pathNodeDummy in npcDummy.children:
-                    npc.PathNodes.append( getDummyPositionVector3( pathNodeDummy ) )
+                for pathNodeHelper in npcHelper.children:
+                    npc.PathNodes.append( getHelperPositionVector3( pathNodeHelper ) )
                     
                 # recalc node count
                 npc.PathNodeCount = len( npc.PathNodes )
                     
                 entries.append( npc )
-        # 15, 16, 17
-        elif block.Type in [18]: # dungeon thing
-            entries = []
-            for entryDummy in blockDummy.children:
-                entry = FbnBlock18Entry()
-                assignObjectFromCustomAttributes( entry, entryDummy )
-                entry.Position = getDummyPositionVector3( entryDummy )
-                entries.append( entry )  
-        elif block.Type == 0x46424E30:
-            # header, no entries
-            pass
         else:
-            print( f'warning: block {block} not fully supported' )
+            entries = []
+            for entryHelper in blockHelper.children:
+                entry = FbnBinary.BLOCK_MAP[block.Type]()
+                assignObjectFromCustomAttributes( entry, entryHelper )
+                if hasattr( entry, "Position" ):
+                    entry.Position = getHelperPositionVector3( entryHelper )
+                if hasattr( entry, 'Rotation' ):
+                    if isinstance( entry.Rotation, Vector3 ):
+                        entry.rotation = getHelperRotationVector3( entryHelper )
+                    elif isinstance( entry.rotation, Quaternion ):
+                        entry.rotation = getHelperRotationQuat( entryHelper )
+                    else:
+                        raise Exception( "Unhandled entry rotation data type" )
+                entries.append( entry )  
         
         fbn.blocks.append( ( block, entries ) )
         
@@ -537,9 +532,9 @@ def createMainWindow():
 def attachDebugger():
     try:
         import ptvsd
-        ptvsd.enable_attach()
+        print( ptvsd.enable_attach() )
     except:
-        pass
+        print('failed to attach debugger')
     
 def main():
     rt.clearListener()

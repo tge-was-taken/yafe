@@ -29,6 +29,7 @@ class FbnBinary:
         14: FbnNpc,
         18: FbnBlock18Entry,
         19: FbnTriggerVolume,
+        21: FbnBlock21Entry,
         22: FbnTriggerVolume
     }
 

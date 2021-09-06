@@ -229,11 +229,12 @@ class BinaryStream:
             return BinaryStream( f.read(), endian )
         
 class Field:
-    def __init__( self, name: str, type: Type, count=1, offset=None, **kwargs: dict ):
+    def __init__( self, name: str, type: Type, count=1, offset=None, endian=None, **kwargs: dict ):
         self.name = name
         self.type = type
         self.count = count
         self.offset = offset
+        self.endian = endian
         for key,val in kwargs:
             setattr(self, key, val)
             
@@ -381,12 +382,18 @@ class Structure(object):
             
     def _readImpl( self, stream: BinaryStream ) -> object:
         # read fields
+        streamEndian = stream.endian
         baseOffset = stream.getOffset()
         for field in self._fields:
             name = field.name
             type = field.type
             count = field.resolveFieldCount( self )
             offset = field.resolveFieldOffset( stream, baseOffset )
+            endian = field.endian
+            if endian == None:
+                endian = streamEndian
+            stream.setEndian( endian )
+            
             
             stream.setOffset( baseOffset + offset )
             if field.isArray():
@@ -399,14 +406,21 @@ class Structure(object):
                 # read single value
                 setattr( self, name, type._read( self, field, stream ) )
                 
+        stream.setEndian( streamEndian )
+                
     def _writeImpl( self, stream: BinaryStream ) -> None:
         # write fields
+        streamEndian = stream.endian
         baseOffset = stream.getOffset()
         for field in self._fields:
             name = field.name
             type = field.type
             count = field.resolveFieldCount( self )
             offset = field.resolveFieldOffset( stream, baseOffset )
+            endian = field.endian
+            if endian == None:
+                endian = streamEndian
+            stream.setEndian( endian )
             
             stream.setOffset( baseOffset + offset )
             if field.isArray():
@@ -417,6 +431,8 @@ class Structure(object):
             else:
                 # write single value
                 type._write( self, field, stream, getattr( self, name ) )
+                
+        stream.setEndian( streamEndian )
       
     # rewritten into read( stream ) so is compatible with required signature
     @classmethod          
