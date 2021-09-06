@@ -124,7 +124,7 @@ class FbnHitDefinition(Structure):
         Field("BitFlags", S32, count=6, offset=None, endian=0),
         Field("Field18", S8, count=1, offset=None, endian=0),
         Field("PromptType", S8, count=1, offset=None, endian=0),
-        Field("Text", FbnHitDefinitionTextIds, count=1, offset=None, endian=0),
+        Field("TextId", S16, count=1, offset=None, endian=0),
         Field("ProcedureId", S16, count=1, offset=None, endian=0),
         Field("PromptSubType", S8, count=1, offset=None, endian=1),
         Field("Unused", S8, count=29, offset=None, endian=1),
@@ -133,7 +133,7 @@ class FbnHitDefinition(Structure):
         self.BitFlags = None
         self.Field18 = None
         self.PromptType = None
-        self.Text = None
+        self.TextId = None
         self.ProcedureId = None
         self.PromptSubType = None
         self.Unused = None
