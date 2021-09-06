@@ -50,7 +50,7 @@ rollout yafeAboutRollout "About"
 (
     label lblAbout "yafe plugin for 3ds Max" across:1
     label lblAbout2 "Persona 5 FBN/HTB importer and exporter" across:1
-    label lblAbout3 "Version 0.1" across:1
+    label lblAbout3 "Version 0.2" across:1
     label lblAbout4 "© 2021 TGE" across:1
 ) 
 
